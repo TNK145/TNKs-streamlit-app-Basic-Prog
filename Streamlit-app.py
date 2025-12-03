@@ -128,7 +128,19 @@ if not api_key:
     st.warning("Please enter your API key.")
     st.stop()
 
-text = st.text_area("Enter Russian text:", height=200, placeholder="Paste Russian text here...")
+# Example default Russian text
+default_text = (
+    "У меня нет ни тетради, ни ручки. "
+    "Я люблю читать книги. "
+    "В парке гуляет собака с хозяином."
+)
+
+text = st.text_area(
+    "Enter Russian text:",
+    height=200,
+    value=default_text,  # <-- default text here
+    placeholder="Paste Russian text here..."
+)
 
 if st.button("Start Analysis"):
     if not text.strip():
