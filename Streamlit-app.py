@@ -26,29 +26,35 @@ def split_into_sentences(text):
 
 def build_prompt(sentences):
     """
-    Prompt instructing LLM to return ONLY raw JSON.
+    Ask the model to return a JSON per word with case, translation, and purpose.
     """
     return f"""
 You are a Russian linguistics expert.
 
-For EACH of the following Russian sentences, analyze the grammar cases used.
+For EACH of the following Russian sentences, analyze all altered words.
 
-Return **ONLY raw JSON** — DO NOT include markdown, code fences, or explanations.
+Return **ONLY raw JSON**, no explanations, no markdown/code fences.
 
-The JSON should be a list of objects, each with these keys:
-- "sentence": original sentence
-- "case": Russian grammatical case(s)
-- "altered_words": list of words whose form was changed
-- "original_forms": list of base/dictionary forms
+JSON format for EACH sentence:
+{{
+  "sentence": "...",
+  "words": [
+    {{
+      "altered": "...",       # altered word in sentence
+      "original": "...",      # base/dictionary form
+      "case": "...",          # grammatical case of the word in this context
+      "english": "...",       # English translation
+      "purpose": "..."        # short explanation of the role/purpose of this case in the sentence
+    }},
+    ...
+  ]
+}}
 
 Sentences:
 {sentences}
 """
 
 def clean_model_json(text):
-    """
-    Remove code fences, markdown, and leading/trailing spaces.
-    """
     text = re.sub(r"^```json\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"^```\s*", "", text)
     text = re.sub(r"```\s*$", "", text)
@@ -81,10 +87,6 @@ def get_valid_gemini_models(api_key):
         return []
 
 def call_model(provider, api_key, prompt, fallback_model="gpt-4.1-mini"):
-    """
-    Returns (text, status)
-    Status can be: "OK", "NO_GEMINI_MODELS", "GEMINI_ERROR", "OPENAI_ERROR:..."
-    """
     if provider == "Gemini":
         try:
             genai.configure(api_key=api_key)
@@ -114,9 +116,9 @@ def call_model(provider, api_key, prompt, fallback_model="gpt-4.1-mini"):
 # ===============================
 
 st.set_page_config(page_title="Russian Grammar Case Analyzer", layout="wide")
-st.title("🇷🇺 Russian Grammar Case Analyzer (Gemini + OpenAI Fallback)")
+st.title("🇷🇺 Russian Grammar Case Analyzer (Word-level)")
 
-st.write("Analyze Russian text for grammatical cases, altered words, and base forms.")
+st.write("Analyze Russian text for grammatical cases, altered words, base forms, English translations, and purpose of each case.")
 
 # Sidebar
 st.sidebar.header("API Settings")
@@ -128,7 +130,7 @@ if not api_key:
     st.warning("Please enter your API key.")
     st.stop()
 
-# Example default Russian text
+# Default text for newcomers
 default_text = (
     "У меня нет ни тетради, ни ручки. "
     "Я люблю читать книги. "
@@ -138,7 +140,7 @@ default_text = (
 text = st.text_area(
     "Enter Russian text:",
     height=200,
-    value=default_text,  # <-- default text here
+    value=default_text,
     placeholder="Paste Russian text here..."
 )
 
@@ -151,6 +153,7 @@ if st.button("Start Analysis"):
     st.write(f"Detected **{len(sentences)}** sentences.")
     results = []
 
+    # Call LLM in batches
     for batch in batch_sentences(sentences, batch_size):
         prompt = build_prompt(batch)
         output, status = call_model(provider, api_key, prompt, fallback_model="gpt-4.1-mini")
@@ -176,18 +179,28 @@ if st.button("Start Analysis"):
 
         results.extend(data)
 
-    df = pd.DataFrame(results)
-    required = ["sentence", "case", "altered_words", "original_forms"]
-    for col in required:
-        if col not in df.columns:
-            df[col] = ""
+    # Flatten word-level info into a single dataframe
+    expanded_rows = []
+    for _, row in enumerate(results):
+        sentence = row.get('sentence', '')
+        words = row.get('words', [])
+        for w in words:
+            expanded_rows.append({
+                "Altered word": w.get("altered", ""),
+                "Original word": w.get("original", ""),
+                "English translation": w.get("english", ""),
+                "Case": w.get("case", ""),
+                "Purpose": w.get("purpose", ""),
+                "Sentence": sentence
+            })
 
-    st.subheader("📊 Analysis Result")
-    st.dataframe(df, use_container_width=True)
+    df_expanded = pd.DataFrame(expanded_rows)
 
+    st.subheader("📊 Word-level Analysis")
+    st.dataframe(df_expanded, use_container_width=True)
     st.download_button(
-        "Download CSV",
-        df.to_csv(index=False).encode("utf-8"),
-        "russian_case_analysis.csv",
+        "Download Word-level CSV",
+        df_expanded.to_csv(index=False).encode("utf-8"),
+        "russian_case_analysis_words.csv",
         "text/csv"
     )
